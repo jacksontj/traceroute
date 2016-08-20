@@ -1,0 +1,4 @@
+TODO:
+    - concurrent probes
+    - force IP version
+    - resolve names of nodes in the traceroute
