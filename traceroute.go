@@ -28,7 +28,6 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	if err != nil {
 		return ProbeResponse{Success: false, Error: err, TTL: ttl}
 	}
-
 	defer syscall.Close(sendSocket)
 
 	// Set the TTL on the sendSocket

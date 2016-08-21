@@ -97,10 +97,14 @@ func recvICMP(recvSocket int, opts *TracerouteOptions) (net.IP, error) {
 		// TODO: implement other L4protocols here
 		switch l4Protocol {
 		case ProtocolUDP:
+			// verify that we sent a UDP probe
+			if opts.ProbeType != UdpProbe {
+				continue
+			}
 			l4header = &UDPHeader{}
 			err := binary.Read(
 				bytes.NewReader(l4Buffer),
-				binary.BigEndian,
+				binary.BigEndian, // TODO: switch based on architecture
 				l4header,
 			)
 			// TODO: this?
