@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"net"
 	"syscall"
 	"time"
 
@@ -40,8 +41,8 @@ func matchICMP(message *icmp.Message, opts *TracerouteOptions) (int, []byte, err
 
 // TODO: better, this is a decent amount of magic... curse you ICMP!!!
 // TODO: with timeout
-// recieve on ICMP socket until you get a message which was destined for dstIP
-func recvICMP(recvSocket int, opts *TracerouteOptions) (syscall.Sockaddr, error) {
+// recieve on ICMP socket until you get a message which was destined for our TracerouteOptions
+func recvICMP(recvSocket int, opts *TracerouteOptions) (net.IP, error) {
 	end := time.Now().Add(opts.ProbeTimeout)
 	for {
 		if time.Now().After(end) {
@@ -54,22 +55,31 @@ func recvICMP(recvSocket int, opts *TracerouteOptions) (syscall.Sockaddr, error)
 			continue
 		}
 		// if we didn't recieve any bytes, go again
-		if n <= 0 {
+		if n <= 20 {
 			continue
 		}
 
 		// We need to know the ip version to load the ICMP message, so we'll
 		// switch on the destination address
+		var hopIP net.IP
 		var icmpProto int
+		var headerLen int
 		switch from.(type) {
 		case *syscall.SockaddrInet4:
+			ipHeader, err := ipv4.ParseHeader(p[0:20])
+			if err != nil {
+				continue
+			}
+			// move our pointer-- we already read that header
+			hopIP = ipHeader.Src
 			icmpProto = ProtocolICMP
+			headerLen = ipHeader.Len
 		case *syscall.SockaddrInet6:
 			icmpProto = ProtocolIPv6ICMP
 		}
 		// TODO: for some reason RecvFrom is giving us the IP header as well-- so we'll
 		// just skip the first 20 bytes and move on with our lives
-		message, err := icmp.ParseMessage(icmpProto, p[20:n])
+		message, err := icmp.ParseMessage(icmpProto, p[headerLen:n])
 		// If the ICMP message is bad, go again
 		if err != nil {
 			continue
@@ -98,7 +108,7 @@ func recvICMP(recvSocket int, opts *TracerouteOptions) (syscall.Sockaddr, error)
 		}
 
 		if l4header.SrcPort() == opts.SourcePort && l4header.DstPort() == opts.DestinationPort {
-			return from, nil
+			return hopIP, nil
 		}
 	}
 }

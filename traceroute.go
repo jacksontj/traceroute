@@ -2,7 +2,6 @@ package traceroute
 
 import (
 	"fmt"
-	"net"
 	"syscall"
 	"time"
 
@@ -55,19 +54,11 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	// Send a single null byte packet
 	syscall.Sendto(sendSocket, []byte{0x0}, 0, opts.destSockaddr)
 
-	from, err := recvICMP(recvSocket, opts)
+	currIP, err := recvICMP(recvSocket, opts)
 	elapsed := time.Since(start)
 	if err != nil {
 		return ProbeResponse{Success: false, Error: err, TTL: ttl}
 	} else {
-		var currIP net.IP
-		switch t := from.(type) {
-		case *syscall.SockaddrInet4:
-			currIP = net.IP(t.Addr[:])
-		case *syscall.SockaddrInet6:
-			currIP = net.IP(t.Addr[:])
-		}
-
 		return ProbeResponse{
 			Success: true,
 			Address: currIP,
