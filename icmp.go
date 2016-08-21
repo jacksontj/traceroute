@@ -51,10 +51,7 @@ func recvICMP(recvSocket int, opts *TracerouteOptions) (syscall.Sockaddr, error)
 		n, from, err := syscall.Recvfrom(recvSocket, p, 0)
 		// if the error was temporarily unavailable, we should retry to a timeout
 		if err != nil {
-			if !time.Now().After(end) {
-				continue
-			}
-			return nil, err
+			continue
 		}
 		// if we didn't recieve any bytes, go again
 		if n <= 0 {
