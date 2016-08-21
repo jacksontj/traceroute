@@ -39,3 +39,13 @@ func ipPortToSockaddr(ip net.IP, port int) syscall.Sockaddr {
 	}
 	return nil
 }
+
+func sockAddrToIP(s syscall.Sockaddr) net.IP {
+	switch t := s.(type) {
+	case *syscall.SockaddrInet4:
+		return t.Addr[:]
+	case *syscall.SockaddrInet6:
+		return t.Addr[:]
+	}
+	return nil
+}

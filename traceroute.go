@@ -1,26 +1,21 @@
 package traceroute
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"net"
 	"syscall"
 	"time"
+	"unsafe"
+
+	"golang.org/x/net/ipv4"
 
 	"github.com/Sirupsen/logrus"
 )
 
 func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval) ProbeResponse {
 	start := time.Now()
-
-	// Set up an ICMP socket to get the TTL expired messages
-	recvSocket, err := syscall.Socket(
-		syscall.AF_INET,
-		syscall.SOCK_RAW,
-		syscall.IPPROTO_ICMP,
-	)
-	if err != nil {
-		return ProbeResponse{Success: false, Error: err, TTL: ttl}
-	}
-	defer syscall.Close(recvSocket)
 
 	// Set up the socket to send packets out on
 	// TODO: switch on probeType
@@ -33,10 +28,9 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	// Set the TTL on the sendSocket
 	syscall.SetsockoptInt(sendSocket, 0x0, syscall.IP_TTL, ttl)
 	// Set a timeout on the send socket (so we don't wait forever)
-	syscall.SetsockoptTimeval(recvSocket, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, timeout)
-
-	// Bind to the local socket to listen for ICMP packets
-	syscall.Bind(recvSocket, opts.sourceSockaddr)
+	syscall.SetsockoptTimeval(sendSocket, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, timeout)
+	// set option to tell the kernel to give us errors when we call recvmsg
+	syscall.SetsockoptInt(sendSocket, syscall.SOL_IP, syscall.IP_RECVERR, 1)
 
 	if opts.SourcePort > 0 {
 		// if srcPort is set, bind to that as well
@@ -53,10 +47,54 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	// Send a single null byte packet
 	syscall.Sendto(sendSocket, []byte{0x0}, 0, opts.destSockaddr)
 
-	currIP, err := recvICMP(recvSocket, opts)
+	var currIP net.IP
+
+	// attempt to get errors?
+	end := time.Now().Add(time.Second)
+	// TODO: goroutine? something cancellable
+	for {
+		if time.Now().After(end) {
+			break
+		}
+		var p = make([]byte, 1500)   // TODO: configurable recv size?
+		var oob = make([]byte, 1500) // TODO: configurable recv size?
+		_, oobn, _, _, err := syscall.Recvmsg(sendSocket, p, oob, syscall.MSG_ERRQUEUE)
+		if err != nil {
+			continue
+		}
+
+		cmsghdr := &syscall.Cmsghdr{}
+		cmsghdrSize := int(unsafe.Sizeof(*cmsghdr))
+		err = binary.Read(
+			bytes.NewReader(oob),
+			binary.LittleEndian, // TODO: switch based on architecture
+			cmsghdr,
+		)
+		if err != nil {
+			continue
+		}
+		// switch on what the error message type is (since we are tracerouting
+		// we are expecting an ICMPTypeTimeExceeded
+		switch cmsghdr.Type {
+		case int32(ipv4.ICMPTypeTimeExceeded):
+			ipHeader, err := ipv4.ParseHeader(oob[cmsghdrSize:oobn])
+			if err != nil {
+				continue
+			}
+			currIP = ipHeader.Src
+		case int32(ipv6.ICMPTypeTimeExceeded):
+			ipHeader, err := ipv4.ParseHeader(oob[cmsghdrSize:oobn])
+			if err != nil {
+				continue
+			}
+			currIP = ipHeader.Src
+		}
+		break
+	}
+
 	elapsed := time.Since(start)
-	if err != nil {
-		return ProbeResponse{Success: false, Error: err, TTL: ttl}
+	if currIP == nil {
+		return ProbeResponse{Success: false, Error: fmt.Errorf("Probe timeout"), TTL: ttl}
 	} else {
 		return ProbeResponse{
 			Success: true,
