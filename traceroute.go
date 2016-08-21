@@ -1,78 +1,13 @@
 package traceroute
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"net"
 	"syscall"
 	"time"
 
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
-
 	"github.com/Sirupsen/logrus"
 )
-
-// TODO: Presumably this is in some other library?
-type udphdr struct {
-	SrcPort uint16
-	DstPort uint16
-	Ulen    uint16
-	Csum    uint16
-}
-
-// TODO: support ipv6
-// TODO: better, this is a decent amount of magic... curse you ICMP!!!
-// TODO: with timeout
-// recieve on ICMP socket until you get a message which was destined for dstIP
-func recvICMP(recvSocket int, opts *TracerouteOptions) (syscall.Sockaddr, error) {
-	for {
-		var p = make([]byte, 1500) // TODO: configurable recv size?
-		n, from, err := syscall.Recvfrom(recvSocket, p, 0)
-		// if the error was temporarily unavailable, we should retry to a timeout
-		if err != nil {
-			return nil, err
-		}
-		if n > 0 {
-			// TODO: for some reason RecvFrom is giving us the IP header as well-- so we'll
-			// just skip the first 20 bytes and move on with our lives
-			var tmp ipv4.ICMPType
-			message, err := icmp.ParseMessage(tmp.Protocol(), p[0:n][20:])
-			if err != nil {
-				return nil, err
-			}
-			logrus.Debugf("ICMP type=%d code=%d message: %v err: %v", message.Type, message.Code, message, err)
-			switch t := message.Body.(type) {
-			case *icmp.TimeExceeded:
-				//logrus.Infof("time exceeded message! %v", t.Data)
-				ipHeader, err := ipv4.ParseHeader(t.Data)
-				if err != nil {
-					return nil, err
-				}
-				// Verify that the destination address is the same
-				// TODO: verify that it was the same src/dst port (same stream)
-				if ipHeader.Dst.Equal(opts.DestinationAddr) {
-					//logrus.Infof("ipHeader=%v err=%d", ipHeader, err)
-					//logrus.Infof("actualDst=%s expectedDst=%s", ipHeader.Dst.String(), dstAddr.String())
-					udp := udphdr{}
-					err := binary.Read(
-						bytes.NewReader(t.Data[ipHeader.Len:ipHeader.TotalLen-1]),
-						binary.BigEndian,
-						&udp,
-					)
-					if err != nil {
-						return nil, err
-					}
-					if int(udp.SrcPort) == opts.SourcePort && int(udp.DstPort) == opts.DestinationPort {
-						return from, nil
-					}
-				}
-
-			}
-		}
-	}
-}
 
 func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval) ProbeResponse {
 	start := time.Now()
