@@ -14,7 +14,8 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-// Determine if the L3 headers match, if so return the L4 protocol number, the buffer, and an error if one exists
+// Determine if the embedded L3 headers match
+// if so return the L4 protocol number, buffer, and error
 func matchICMP(message *icmp.Message, opts *TracerouteOptions) (int, []byte, error) {
 	switch t := message.Body.(type) {
 	case *icmp.TimeExceeded:
@@ -22,7 +23,7 @@ func matchICMP(message *icmp.Message, opts *TracerouteOptions) (int, []byte, err
 		case ProtocolICMP:
 			ipHeader, err := ipv4.ParseHeader(t.Data)
 			if err != nil {
-				return 0, nil, err
+				return -1, nil, err
 			}
 			// Verify that the destination address is the same
 			if ipHeader.Dst.Equal(opts.DestinationAddr) {
@@ -59,14 +60,14 @@ func recvICMP(recvSocket int, opts *TracerouteOptions) (net.IP, error) {
 			continue
 		}
 
-		// We need to know the ip version to load the ICMP message, so we'll
-		// switch on the destination address
 		var hopIP net.IP
 		var icmpProto int
 		var headerLen int
+		// We need to know the ip version to load the L3 header, we'll determine this
+		// from the socket type
 		switch from.(type) {
 		case *syscall.SockaddrInet4:
-			ipHeader, err := ipv4.ParseHeader(p[0:20])
+			ipHeader, err := ipv4.ParseHeader(p[0:ipv4.HeaderLen])
 			if err != nil {
 				continue
 			}
@@ -77,8 +78,9 @@ func recvICMP(recvSocket int, opts *TracerouteOptions) (net.IP, error) {
 		case *syscall.SockaddrInet6:
 			icmpProto = ProtocolIPv6ICMP
 		}
-		// TODO: for some reason RecvFrom is giving us the IP header as well-- so we'll
-		// just skip the first 20 bytes and move on with our lives
+		// Now that we have parsed out what proto this is, and who sent us the packet,
+		// we need to open up the ICMP message itself-- which is the remainder of the
+		// response
 		message, err := icmp.ParseMessage(icmpProto, p[headerLen:n])
 		// If the ICMP message is bad, go again
 		if err != nil {
