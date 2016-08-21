@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 
 	"github.com/Sirupsen/logrus"
 )
@@ -30,7 +31,10 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	// Set a timeout on the send socket (so we don't wait forever)
 	syscall.SetsockoptTimeval(sendSocket, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, timeout)
 	// set option to tell the kernel to give us errors when we call recvmsg
-	syscall.SetsockoptInt(sendSocket, syscall.SOL_IP, syscall.IP_RECVERR, 1)
+	err = syscall.SetsockoptInt(sendSocket, syscall.SOL_IP, syscall.IP_RECVERR, 1)
+	if err != nil {
+		logrus.Errorf("error IP_RECVERR: %v", err)
+	}
 
 	if opts.SourcePort > 0 {
 		// if srcPort is set, bind to that as well
@@ -66,7 +70,7 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 		cmsghdr := &syscall.Cmsghdr{}
 		cmsghdrSize := int(unsafe.Sizeof(*cmsghdr))
 		err = binary.Read(
-			bytes.NewReader(oob),
+			bytes.NewReader(oob[:cmsghdrSize]),
 			binary.LittleEndian, // TODO: switch based on architecture
 			cmsghdr,
 		)
@@ -77,13 +81,19 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 		// we are expecting an ICMPTypeTimeExceeded
 		switch cmsghdr.Type {
 		case int32(ipv4.ICMPTypeTimeExceeded):
-			ipHeader, err := ipv4.ParseHeader(oob[cmsghdrSize:oobn])
+			// TODO: remove magic number "24"
+			// for some reason on ubuntu 12.04 I'm getting 28 bytes after
+			// the cmsghdr -- which means there are 4 additional bytes in
+			// the buffer-- which throws off this header parse.
+			// For now I'm hard coding in this 24-- but it obviously can't stay
+			ipHeader, err := ipv4.ParseHeader(oob[oobn-24 : oobn])
 			if err != nil {
 				continue
 			}
 			currIP = ipHeader.Src
 		case int32(ipv6.ICMPTypeTimeExceeded):
-			ipHeader, err := ipv4.ParseHeader(oob[cmsghdrSize:oobn])
+			// TODO: figure out correct offset
+			ipHeader, err := ipv6.ParseHeader(oob[oobn-24 : oobn])
 			if err != nil {
 				continue
 			}
