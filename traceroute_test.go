@@ -19,7 +19,7 @@ func getOptions() *TracerouteOptions {
 	}
 	return &TracerouteOptions{
 		SourceAddr: ip,
-		SourcePort: 34456,
+		SourcePort: 34457,
 
 		DestinationAddr: dstIPs[0],
 		DestinationPort: 80,
