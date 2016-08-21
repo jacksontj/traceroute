@@ -6,12 +6,12 @@ import (
 	"time"
 )
 
-type probeType uint8
+type ProbeType uint8
 
 const (
-	udpProbe probeType = iota
-	tcpProbe
-	icmpProbe
+	UdpProbe ProbeType = iota
+	TcpProbe
+	IcmpProbe
 )
 
 // TODO: size of packet to send
@@ -25,7 +25,7 @@ type TracerouteOptions struct {
 	destSockaddr    syscall.Sockaddr
 
 	// enumerated value of tcp/udp/icmp
-	ProbeType probeType // TODO: make the enum
+	ProbeType ProbeType // TODO: make the enum
 
 	// TTL options
 	StartingTTL int // default to 1
@@ -45,4 +45,6 @@ type TracerouteOptions struct {
 	// TODO
 	// Result options
 	// don't resolve IP -> name
+
+	ResultChan chan *ProbeResponse
 }

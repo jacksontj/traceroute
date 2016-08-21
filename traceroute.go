@@ -19,7 +19,7 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 		syscall.IPPROTO_ICMP,
 	)
 	if err != nil {
-		return ProbeResponse{Success: false, Error: err}
+		return ProbeResponse{Success: false, Error: err, TTL: ttl}
 	}
 	defer syscall.Close(recvSocket)
 
@@ -27,7 +27,7 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	// TODO: switch on probeType
 	sendSocket, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
 	if err != nil {
-		return ProbeResponse{Success: false, Error: err}
+		return ProbeResponse{Success: false, Error: err, TTL: ttl}
 	}
 
 	defer syscall.Close(sendSocket)
@@ -46,7 +46,7 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 		err = syscall.Bind(sendSocket, opts.sourceSockaddr)
 		// TODO: non-fatal error
 		if err != nil {
-			return ProbeResponse{Success: false, Error: err}
+			return ProbeResponse{Success: false, Error: err, TTL: ttl}
 		}
 	}
 
@@ -59,7 +59,7 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	n, from, err := syscall.Recvfrom(recvSocket, p, 0)
 	elapsed := time.Since(start)
 	if err != nil {
-		return ProbeResponse{Success: false, Error: err}
+		return ProbeResponse{Success: false, Error: err, TTL: ttl}
 	} else {
 		var currIP net.IP
 		switch t := from.(type) {
@@ -83,6 +83,10 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 func Traceroute(opts *TracerouteOptions) (TracerouteResult, error) {
 	logrus.Debugf("doing a traceroute: %v", opts)
 
+	if opts.ResultChan != nil {
+		defer close(opts.ResultChan)
+	}
+
 	result := TracerouteResult{
 		Opts: opts,
 		Hops: make([]Hop, 0),
@@ -102,6 +106,10 @@ func Traceroute(opts *TracerouteOptions) (TracerouteResult, error) {
 		for x := 0; x < opts.ProbeCount; x++ {
 			probeResponse := tracerouteProbe(opts, ttl, &timeout)
 			logrus.Debugf("Probe %d: %v", ttl, probeResponse)
+			// TODO: nonblocking?
+			if opts.ResultChan != nil {
+				opts.ResultChan <- &probeResponse
+			}
 			responses = append(responses, probeResponse)
 			finalDestination = finalDestination && probeResponse.Address.Equal(opts.DestinationAddr)
 		}

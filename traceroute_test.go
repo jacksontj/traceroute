@@ -25,7 +25,7 @@ func getOptions() *TracerouteOptions {
 		DestinationPort: 80,
 
 		// enumerated value of tcp/udp/icmp
-		ProbeType: udpProbe,
+		ProbeType: UdpProbe,
 
 		// TTL options
 		StartingTTL: 1,
