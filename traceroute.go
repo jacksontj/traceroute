@@ -1,8 +1,6 @@
 package traceroute
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"net"
 	"syscall"
@@ -63,49 +61,39 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 		var p = make([]byte, 1500)   // TODO: configurable recv size?
 		var oob = make([]byte, 1500) // TODO: configurable recv size?
 		_, oobn, _, _, err := syscall.Recvmsg(sendSocket, p, oob, syscall.MSG_ERRQUEUE)
-		if err != nil {
+		if err != nil || oobn <= 0 {
 			continue
 		}
 
-		cmsghdr := &syscall.Cmsghdr{}
-		cmsghdrSize := int(unsafe.Sizeof(*cmsghdr))
-		err = binary.Read(
-			bytes.NewReader(oob[:cmsghdrSize]),
-			binary.LittleEndian, // TODO: switch based on architecture
-			cmsghdr,
-		)
+		// TODO: cleanup this parsing? Right now these structs aren't really well
+		// APId, so we end up having to do a fair amount of magic. I'll do my best
+		// to document the magic for now
+
+		// The beginning of the oob is a cmsghdr, so we need to load that
+		cmsghdr := (*syscall.Cmsghdr)(unsafe.Pointer(&oob[0]))
 		// If this isn't an IP level message, skip it
 		if cmsghdr.Level != syscall.IPPROTO_IP {
 			continue
 		}
 
-		// TODO: parse all the cmsgs in here-- there might be more than one
-		// these messages are only supposed accessed using the cmsg helpers
-		// in the kernel: http://man7.org/linux/man-pages/man3/cmsg.3.html
-		if err != nil {
+		// After the cmsghdr is a SockExtendedErr, so we do similar things
+		se := (*SockExtendedErr)(unsafe.Pointer(&oob[syscall.SizeofCmsghdr]))
+
+		// If the message isn't from ICMP-- skip (TODO: not a magic number here!
+		// Number taken from http://lxr.free-electrons.com/source/include/uapi/linux/errqueue.h#L18
+		if se.Origin != 2 {
 			continue
 		}
-		// switch on what the error message type is (since we are tracerouting
+
+		// Switch on the msg type
 		// we are expecting an ICMPTypeTimeExceeded
 		switch cmsghdr.Type {
 		case int32(ipv4.ICMPTypeTimeExceeded):
-			// TODO: remove magic number "24"
-			// for some reason on ubuntu 12.04 I'm getting 28 bytes after
-			// the cmsghdr -- which means there are 4 additional bytes in
-			// the buffer-- which throws off this header parse.
-			// For now I'm hard coding in this 24-- but it obviously can't stay
-			ipHeader, err := ipv4.ParseHeader(oob[oobn-24 : oobn])
-			if err != nil {
-				continue
-			}
-			currIP = ipHeader.Src
+			src := (*syscall.RawSockaddrInet4)(unsafe.Pointer(&oob[syscall.SizeofCmsghdr+int(unsafe.Sizeof(*se))]))
+			currIP = sockAddrToIP(&syscall.SockaddrInet4{Port: int(src.Port), Addr: src.Addr})
 		case int32(ipv6.ICMPTypeTimeExceeded):
-			// TODO: figure out correct offset
-			ipHeader, err := ipv6.ParseHeader(oob[oobn-24 : oobn])
-			if err != nil {
-				continue
-			}
-			currIP = ipHeader.Src
+			src := (*syscall.RawSockaddrInet6)(unsafe.Pointer(&oob[syscall.SizeofCmsghdr+int(unsafe.Sizeof(*se))]))
+			currIP = sockAddrToIP(&syscall.SockaddrInet6{Port: int(src.Port), Addr: src.Addr})
 		}
 		break
 	}
