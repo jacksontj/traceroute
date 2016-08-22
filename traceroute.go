@@ -74,6 +74,14 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 			binary.LittleEndian, // TODO: switch based on architecture
 			cmsghdr,
 		)
+		// If this isn't an IP level message, skip it
+		if cmsghdr.Level != syscall.IPPROTO_IP {
+			continue
+		}
+
+		// TODO: parse all the cmsgs in here-- there might be more than one
+		// these messages are only supposed accessed using the cmsg helpers
+		// in the kernel: http://man7.org/linux/man-pages/man3/cmsg.3.html
 		if err != nil {
 			continue
 		}
