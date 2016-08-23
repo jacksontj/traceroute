@@ -55,9 +55,22 @@ func tracerouteProbe(opts *TracerouteOptions, ttl int, timeout *syscall.Timeval)
 	end := time.Now().Add(time.Second)
 	// TODO: goroutine? something cancellable
 	for {
-		if time.Now().After(end) {
+		now := time.Now()
+		if now.After(end) {
 			break
 		}
+
+		// golang creates all sockets as nonblocking. Although we *should* be able
+		// to use syscall.SetNonblock(sendSocket, false) -- it doesn't seem to work
+		// for some reason (presumably due to the magic that makes it nonblocking)
+		// instead of spinning for days-- we can epoll on it (for some reason select
+		// isn't working, presumably it doesn't have the correct magic).
+		epollfd, err := syscall.EpollCreate(1)
+		defer syscall.Close(epollfd)
+		epollevent := syscall.EpollEvent{}
+		err = syscall.EpollCtl(epollfd, syscall.EPOLL_CTL_ADD, sendSocket, &epollevent)
+		syscall.EpollWait(epollfd, []syscall.EpollEvent{epollevent}, int(end.Sub(now).Nanoseconds() / int64(time.Millisecond)))
+
 		var p = make([]byte, 1500)   // TODO: configurable recv size?
 		var oob = make([]byte, 1500) // TODO: configurable recv size?
 		_, oobn, _, _, err := syscall.Recvmsg(sendSocket, p, oob, syscall.MSG_ERRQUEUE)
